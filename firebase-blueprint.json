@@ -1,0 +1,75 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Stores user profile information and roles.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "username": { "type": "string", "description": "Unique username" },
+        "role": { "type": "string", "enum": ["admin", "employee", "qr_display"], "description": "User role" },
+        "displayName": { "type": "string", "description": "User's display name" },
+        "email": { "type": "string", "format": "email", "description": "User's email" },
+        "permissions": {
+          "type": "object",
+          "properties": {
+            "canViewHistory": { "type": "boolean" }
+          }
+        }
+      },
+      "required": ["uid", "role", "displayName"]
+    },
+    "AttendanceRecord": {
+      "title": "Attendance Record",
+      "description": "Stores check-in and check-out records.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "username": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "type": { "type": "string", "enum": ["check-in", "check-out"] },
+        "location": {
+          "type": "object",
+          "properties": {
+            "lat": { "type": "number" },
+            "lng": { "type": "number" },
+            "accuracy": { "type": "number" },
+            "isInsideRange": { "type": "boolean" }
+          }
+        }
+      },
+      "required": ["uid", "timestamp", "type"]
+    },
+    "SystemSettings": {
+      "title": "System Settings",
+      "description": "Global system settings.",
+      "type": "object",
+      "properties": {
+        "companyLocation": {
+          "type": "object",
+          "properties": {
+            "lat": { "type": "number" },
+            "lng": { "type": "number" },
+            "radius": { "type": "number" }
+          }
+        }
+      }
+    },
+    "QRToken": {
+      "title": "QR Token",
+      "description": "Temporary token for QR code attendance.",
+      "type": "object",
+      "properties": {
+        "token": { "type": "string" },
+        "expiresAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["token", "expiresAt"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": { "schema": "UserProfile", "description": "User profiles" },
+    "/attendance/{recordId}": { "schema": "AttendanceRecord", "description": "Attendance history" },
+    "/settings/global": { "schema": "SystemSettings", "description": "Global settings" },
+    "/qr_tokens/current": { "schema": "QRToken", "description": "Current active QR token" }
+  }
+}

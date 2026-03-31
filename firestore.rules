@@ -1,0 +1,107 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: users
+    // Document ID: {uid}
+    // Fields:
+    //   - uid: string (required)
+    //   - username: string (optional)
+    //   - role: string (required, ['admin', 'employee', 'qr_display'])
+    //   - displayName: string (required)
+    //   - email: string (optional)
+    //   - permissions: map (optional)
+    //
+    // Collection: attendance
+    // Document ID: {recordId}
+    // Fields:
+    //   - uid: string (required)
+    //   - username: string (required)
+    //   - timestamp: timestamp (required)
+    //   - type: string (required, ['check-in', 'check-out'])
+    //   - location: map (optional)
+    //
+    // Collection: settings
+    // Document ID: global
+    // Fields:
+    //   - companyLocation: map (optional)
+    //
+    // Collection: qr_tokens
+    // Document ID: current
+    // Fields:
+    //   - token: string (required)
+    //   - expiresAt: timestamp (required)
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+        (request.auth.token.email == "abosaidabosaid5@gmail.com" && request.auth.token.email_verified == true)
+      );
+    }
+
+    function isEmployee() {
+      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'employee';
+    }
+
+    function isQRDisplay() {
+      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'qr_display';
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'role', 'displayName']) &&
+             data.uid is string &&
+             data.role in ['admin', 'employee', 'qr_display'] &&
+             data.displayName is string &&
+             data.displayName.size() > 0 && data.displayName.size() < 100;
+    }
+
+    function isValidAttendance(data) {
+      return data.keys().hasAll(['uid', 'username', 'timestamp', 'type']) &&
+             data.uid is string &&
+             data.username is string &&
+             data.timestamp is timestamp &&
+             data.type in ['check-in', 'check-out'];
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{uid} {
+      allow read: if isAuthenticated() && (isOwner(uid) || isAdmin());
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(uid) || isAdmin());
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && (isAdmin() || (isOwner(uid) && request.resource.data.role == resource.data.role));
+      allow delete: if isAdmin();
+    }
+
+    match /attendance/{recordId} {
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidAttendance(request.resource.data) && (request.auth.uid == request.resource.data.uid || isAdmin());
+      allow update, delete: if isAdmin();
+    }
+
+    match /settings/global {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /qr_tokens/current {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || isQRDisplay();
+    }
+  }
+}
