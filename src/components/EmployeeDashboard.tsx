@@ -43,6 +43,21 @@ export default function EmployeeDashboard({ user }: EmployeeDashboardProps) {
   const [scanType, setScanType] = useState<'check-in' | 'check-out' | null>(null);
 
   useEffect(() => {
+    setIsScanning(false);
+    setScanType(null);
+  }, [activeTab]);
+
+  useEffect(() => {
+    const unsubAttendance = getAttendanceHistory(user.uid, setAttendance);
+    const unsubQR = subscribeToQRToken(setQrToken);
+    getSystemSettings().then(setSettings);
+    return () => {
+      unsubAttendance();
+      unsubQR();
+    };
+  }, [user.uid]);
+
+  useEffect(() => {
     let scanner: Html5QrcodeScanner | null = null;
     if (isScanning) {
       scanner = new Html5QrcodeScanner(
