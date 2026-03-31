@@ -23,9 +23,13 @@ import {
   ExternalLink,
   Globe,
   Trash2,
-  Lock
+  Lock,
+  Download,
+  Search,
+  Filter,
+  Calendar
 } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, isWithinInterval, startOfDay, endOfDay, parseISO } from 'date-fns';
 import { ar } from 'date-fns/locale';
 
 interface AdminDashboardProps {
@@ -43,6 +47,12 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
   const [settings, setSettings] = useState<SystemSettings>({
     companyLocation: { lat: 0, lng: 0, radius: 100 }
   });
+  
+  // Reports filters
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedEmployee, setSelectedEmployee] = useState('all');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
 
   useEffect(() => {
     const unsubAttendance = getAllAttendance(setAttendance);
@@ -145,6 +155,45 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
     } catch (err) {
       console.error('Logout error:', err);
     }
+  };
+
+  const filteredAttendance = attendance.filter(record => {
+    const matchesSearch = record.username.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                         (employees.find(e => e.uid === record.uid)?.displayName || '').toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesEmployee = selectedEmployee === 'all' || record.uid === selectedEmployee;
+    
+    let matchesDate = true;
+    if (startDate || endDate) {
+      const recordDate = record.timestamp instanceof Timestamp ? record.timestamp.toDate() : new Date(record.timestamp);
+      const start = startDate ? startOfDay(parseISO(startDate)) : new Date(0);
+      const end = endDate ? endOfDay(parseISO(endDate)) : new Date(8640000000000000);
+      matchesDate = isWithinInterval(recordDate, { start, end });
+    }
+
+    return matchesSearch && matchesEmployee && matchesDate;
+  });
+
+  const exportToCSV = () => {
+    const headers = ['الموظف', 'التاريخ', 'الوقت', 'النوع', 'الموقع', 'داخل النطاق'];
+    const rows = filteredAttendance.map(r => [
+      r.username,
+      format(r.timestamp instanceof Timestamp ? r.timestamp.toDate() : new Date(r.timestamp), 'yyyy/MM/dd'),
+      format(r.timestamp instanceof Timestamp ? r.timestamp.toDate() : new Date(r.timestamp), 'hh:mm a'),
+      r.type === 'check-in' ? 'حضور' : 'انصراف',
+      r.location ? `${r.location.lat}, ${r.location.lng}` : 'N/A',
+      r.location?.isInsideRange ? 'نعم' : 'لا'
+    ]);
+
+    const csvContent = "data:text/csv;charset=utf-8," + 
+      [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `attendance_report_${format(new Date(), 'yyyy-MM-dd')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   return (
@@ -309,16 +358,82 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
 
         {activeTab === 'reports' && (
           <div className="max-w-6xl mx-auto space-y-6">
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
               <h2 className="text-2xl font-bold text-gray-900">سجل الحضور والانصراف العام</h2>
-              <div className="flex gap-4">
+              <div className="flex flex-wrap gap-4">
+                <button 
+                  onClick={exportToCSV}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-blue-700 transition-all shadow-md"
+                >
+                  <Download className="w-4 h-4" />
+                  تصدير CSV
+                </button>
                 <div className="bg-green-50 text-green-700 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4" />
-                  داخل النطاق: {attendance.filter(r => r.location?.isInsideRange).length}
+                  داخل النطاق: {filteredAttendance.filter(r => r.location?.isInsideRange).length}
                 </div>
                 <div className="bg-red-50 text-red-700 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">
                   <XCircle className="w-4 h-4" />
-                  خارج النطاق: {attendance.filter(r => r.location && !r.location.isInsideRange).length}
+                  خارج النطاق: {filteredAttendance.filter(r => r.location && !r.location.isInsideRange).length}
+                </div>
+              </div>
+            </div>
+
+            {/* Filters */}
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-400 flex items-center gap-1">
+                    <Search className="w-3 h-3" />
+                    بحث بالموظف
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="ابحث باسم المستخدم..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-400 flex items-center gap-1">
+                    <Filter className="w-3 h-3" />
+                    تصفية حسب الموظف
+                  </label>
+                  <select
+                    value={selectedEmployee}
+                    onChange={(e) => setSelectedEmployee(e.target.value)}
+                    className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                  >
+                    <option value="all">جميع الموظفين</option>
+                    {employees.filter(e => e.role === 'employee').map(emp => (
+                      <option key={emp.uid} value={emp.uid}>{emp.displayName}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-400 flex items-center gap-1">
+                    <Calendar className="w-3 h-3" />
+                    من تاريخ
+                  </label>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-400 flex items-center gap-1">
+                    <Calendar className="w-3 h-3" />
+                    إلى تاريخ
+                  </label>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                  />
                 </div>
               </div>
             </div>
@@ -335,7 +450,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {attendance.map((record) => (
+                  {filteredAttendance.map((record) => (
                     <tr key={record.id} className="hover:bg-gray-50 transition-all">
                       <td className="px-6 py-4">
                         <div className="font-medium text-gray-900">{record.username}</div>

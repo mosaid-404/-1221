@@ -63,6 +63,9 @@ export const logAttendance = async (
         settings.companyLocation.lng
       );
       isInsideRange = distance <= settings.companyLocation.radius;
+      if (!isInsideRange) {
+        throw new Error(`أنت خارج نطاق الشركة المسموح به. المسافة الحالية: ${Math.round(distance)} متر`);
+      }
     }
   }
 

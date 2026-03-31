@@ -24,6 +24,7 @@ import {
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { Timestamp } from 'firebase/firestore';
+import { Html5QrcodeScanner } from 'html5-qrcode';
 
 interface EmployeeDashboardProps {
   user: UserProfile;
@@ -38,16 +39,54 @@ export default function EmployeeDashboard({ user }: EmployeeDashboardProps) {
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
   const [settings, setSettings] = useState<SystemSettings | null>(null);
   const [newPassword, setNewPassword] = useState('');
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanType, setScanType] = useState<'check-in' | 'check-out' | null>(null);
 
   useEffect(() => {
-    const unsubAttendance = getAttendanceHistory(user.uid, setAttendance);
-    const unsubQR = subscribeToQRToken(setQrToken);
-    getSystemSettings().then(setSettings);
+    let scanner: Html5QrcodeScanner | null = null;
+    if (isScanning) {
+      scanner = new Html5QrcodeScanner(
+        "reader",
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        /* verbose= */ false
+      );
+      scanner.render(onScanSuccess, onScanFailure);
+    }
+
     return () => {
-      unsubAttendance();
-      unsubQR();
+      if (scanner) {
+        scanner.clear().catch(error => console.error("Failed to clear scanner", error));
+      }
     };
-  }, [user.uid]);
+  }, [isScanning]);
+
+  function onScanSuccess(decodedText: string) {
+    setIsScanning(false);
+    if (scanType) {
+      handleAttendance(scanType, decodedText);
+    }
+  }
+
+  function onScanFailure(error: any) {
+    // console.warn(`Code scan error = ${error}`);
+  }
+
+  const handleAttendance = async (type: 'check-in' | 'check-out', token: string) => {
+    setLoading(true);
+    setMessage({ text: 'جاري تحديد الموقع...', type: 'info' });
+    
+    try {
+      const loc = await fetchLocation();
+      await logAttendance(user.uid, user.username, type, token, loc);
+      setMessage({ text: `تم تسجيل ${type === 'check-in' ? 'الحضور' : 'الانصراف'} بنجاح`, type: 'success' });
+      setTimeout(() => setMessage(null), 3000);
+    } catch (err: any) {
+      setMessage({ text: err.message || 'خطأ في التسجيل', type: 'error' });
+    } finally {
+      setLoading(false);
+      setScanType(null);
+    }
+  };
 
   const fetchLocation = (): Promise<{ lat: number; lng: number; accuracy: number }> => {
     return new Promise((resolve, reject) => {
@@ -83,35 +122,8 @@ export default function EmployeeDashboard({ user }: EmployeeDashboardProps) {
   };
 
   const handleAction = async (type: 'check-in' | 'check-out') => {
-    if (!qrToken) {
-      setMessage({ text: 'يرجى انتظار رمز QR', type: 'error' });
-      return;
-    }
-
-    // Check if token is expired
-    const now = new Date();
-    const expiresAt = new Date(qrToken.expiresAt);
-    if (now > expiresAt) {
-      setMessage({ text: 'رمز QR منتهي الصلاحية، يرجى الانتظار لتحديثه', type: 'error' });
-      return;
-    }
-
-    setLoading(true);
-    setMessage({ text: 'جاري تحديد الموقع...', type: 'info' });
-    
-    try {
-      const loc = await fetchLocation();
-      
-      await logAttendance(user.uid, user.username, type, qrToken.token, loc);
-      setMessage({ text: `تم تسجيل ${type === 'check-in' ? 'الحضور' : 'الانصراف'} بنجاح`, type: 'success' });
-      
-      // Clear message after 3 seconds
-      setTimeout(() => setMessage(null), 3000);
-    } catch (err: any) {
-      setMessage({ text: err.message || 'خطأ في التسجيل', type: 'error' });
-    } finally {
-      setLoading(false);
-    }
+    setScanType(type);
+    setIsScanning(true);
   };
 
   const handleLogout = async () => {
@@ -182,24 +194,36 @@ export default function EmployeeDashboard({ user }: EmployeeDashboardProps) {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-4">
-                <button
-                  onClick={() => handleAction('check-in')}
-                  disabled={loading || !qrToken}
-                  className="flex flex-col items-center gap-3 p-6 bg-green-600 hover:bg-green-700 text-white rounded-2xl transition-all shadow-lg disabled:opacity-50"
-                >
-                  <CheckCircle2 className="w-8 h-8" />
-                  <span className="font-bold">تسجيل حضور</span>
-                </button>
-                <button
-                  onClick={() => handleAction('check-out')}
-                  disabled={loading || !qrToken}
-                  className="flex flex-col items-center gap-3 p-6 bg-orange-600 hover:bg-orange-700 text-white rounded-2xl transition-all shadow-lg disabled:opacity-50"
-                >
-                  <Clock className="w-8 h-8" />
-                  <span className="font-bold">تسجيل انصراف</span>
-                </button>
-              </div>
+              {isScanning ? (
+                <div className="space-y-4">
+                  <div id="reader" className="overflow-hidden rounded-2xl border-2 border-blue-100"></div>
+                  <button 
+                    onClick={() => { setIsScanning(false); setScanType(null); }}
+                    className="w-full py-3 bg-gray-100 text-gray-700 rounded-xl font-bold"
+                  >
+                    إلغاء المسح
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  <button
+                    onClick={() => handleAction('check-in')}
+                    disabled={loading}
+                    className="flex flex-col items-center gap-3 p-6 bg-green-600 hover:bg-green-700 text-white rounded-2xl transition-all shadow-lg disabled:opacity-50"
+                  >
+                    <CheckCircle2 className="w-8 h-8" />
+                    <span className="font-bold">تسجيل حضور</span>
+                  </button>
+                  <button
+                    onClick={() => handleAction('check-out')}
+                    disabled={loading}
+                    className="flex flex-col items-center gap-3 p-6 bg-orange-600 hover:bg-orange-700 text-white rounded-2xl transition-all shadow-lg disabled:opacity-50"
+                  >
+                    <Clock className="w-8 h-8" />
+                    <span className="font-bold">تسجيل انصراف</span>
+                  </button>
+                </div>
+              )}
 
               <div className="pt-4 border-t border-gray-50 flex items-center justify-center gap-2 text-xs text-gray-400">
                 <MapPin className="w-3 h-3" />
@@ -209,10 +233,6 @@ export default function EmployeeDashboard({ user }: EmployeeDashboardProps) {
                   <span>جاري انتظار تحديد الموقع...</span>
                 )}
               </div>
-
-              {!qrToken && (
-                <p className="text-xs text-red-500 animate-pulse">جاري انتظار رمز الكيو ار كود...</p>
-              )}
             </div>
           </div>
         )}
